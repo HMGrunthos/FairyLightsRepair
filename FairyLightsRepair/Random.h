@@ -21,17 +21,17 @@
 		return (_randomNumber = lfsr16_next(_randomNumber));
 	}
 
-	static uint16_t getLastRandomNumber(void)
+	static inline uint16_t getLastRandomNumber(void)
 	{
 		return _randomNumber;
 	}
 
-	static void random16InitFromSeed(const uint16_t seed)
+	static inline void random16InitFromSeed(const uint16_t seed)
 	{
 		_randomNumber = seed;
 	}
 
-	static void random16InitFromEEPROM(void) // Make sure this is called before interrupts are enabled
+	static inline void random16InitFromEEPROM(void) // Make sure this is called before interrupts are enabled
 	{
 		// cli(); // See above
 		while(EECR & (1 << EEPE));
