@@ -59,9 +59,7 @@ DEBUG = stabs
 CSTANDARD = -std=gnu99
 
 # Place -D or -U options here
-# CDEFS = -DF_CPU=1200000UL
-CDEFS = -DF_CPU=9600000UL
-# CDEFS = -DF_CPU=1200000UL
+CDEFS = -DF_CPU=600000UL
 
 # Place -I options here
 CINCS =
@@ -272,6 +270,9 @@ Lights.o: Lights.c /home/sam/avr-gcc-9.2/avr/include/avr/io.h \
  /home/sam/avr-gcc-9.2/avr/include/avr/lock.h \
  /home/sam/avr-gcc-9.2/avr/include/avr/interrupt.h \
  /home/sam/avr-gcc-9.2/avr/include/avr/sleep.h \
+ /home/sam/avr-gcc-9.2/avr/include/avr/pgmspace.h \
+ /home/sam/avr-gcc-9.2/lib/gcc/avr/9.2.0/include/stddef.h \
  /home/sam/avr-gcc-9.2/avr/include/util/delay.h \
  /home/sam/avr-gcc-9.2/avr/include/util/delay_basic.h \
- /home/sam/avr-gcc-9.2/avr/include/math.h Random.h
+ /home/sam/avr-gcc-9.2/avr/include/math.h \
+ /home/sam/avr-gcc-9.2/avr/include/stdlib.h Random.h

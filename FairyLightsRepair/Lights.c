@@ -8,30 +8,31 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
+#include <avr/pgmspace.h>
 #include <util/delay.h>
 
+#include <stdlib.h>
+
 #include "Random.h"
+// #include "Serial.h"
 
 enum DisaplyMode {
-	High,
-	Medium1,
-	Medium2,
-	Low,
 	Breathe,
+	Freeze,
 	Flicker,
 	Flash,
 	Off
 };
-static const uint8_t MODEMASK = 0x07;
 
-static const uint8_t BREATHEPERIOD = 1;
+#define BREATH_DXINXSCALE_ASPOWER 3
+#define BREATH_GRADSCALEPWR 2
+static const uint8_t breathTable[33] PROGMEM = {255, 245, 203, 165, 136, 112, 91, 75, 62, 51, 42, 35, 29, 24, 20, 16, 13, 10, 8, 7, 7, 8, 11, 17, 25, 36, 52, 72, 97, 131, 170, 216, 255};
 
 static void initHW(void);
 static void prepareForOffMode(void);
 static void prepareForOnModes(void);
+static uint8_t getBreathIntensity(const uint8_t findMe);
 static void waitForButtonRelease(void);
-
-volatile int8_t pulseCommand = 0;
 
 int main(void)
 {
@@ -41,50 +42,31 @@ int main(void)
 
 	prepareForOffMode(); // The system immediately goes into low power mode so we prepare for this
 
-	uint8_t modeState;
+	uint16_t modeState = 0;
 	uint8_t butonState = 0xFE;
 	enum DisaplyMode currentMode = Off;
 	while(1) {
+		uint8_t val;
 		// Definition of input control
 		butonState = (butonState << 1) | (PINB & (1 << PINB1)) | (0xE0); // De-bounce the input with some don't cares (so that the button remains responsive)
 		if(butonState == 0xF0) { // Button pressed
 			currentMode++; // Next mode on button pressed
+			if(currentMode > Off) {
+				currentMode = Breathe;
+			}
 		}
 		
 		// Definition of output behavior
-		switch(currentMode & MODEMASK) {
-			case High:
-				cli();
-					OCR0A = 0xFF;
-				sei();
-				break;
-			case Medium1:
-				cli();
-					OCR0A = 0x90;
-				sei();
-				break;
-			case Medium2:
-				cli();
-					OCR0A = 0x50;
-				sei();
-				break;
-			case Low:
-				cli();
-					OCR0A = 0x20;
-				sei();
-				break;
+		switch(currentMode) {
 			case Breathe:
-				cli();
-					if(OCR0A >= (256-BREATHEPERIOD)) {
-						pulseCommand = -BREATHEPERIOD;
-					} else if(OCR0A <= 0x20) {
-						pulseCommand = BREATHEPERIOD;
-					}
-				sei();
+					val = getBreathIntensity(2*(modeState >> 2));
+					cli();
+						OCR0A = val;
+					sei();
+				break;
+			case Freeze: // Hold the current intensity
 				break;
 			case Flicker:
-				pulseCommand = 0;
-				modeState++;
 				if((modeState & 0x3) == 0) {
 					if((random16() + (1<<15)) < (1<<15)) {
 						cli();
@@ -99,7 +81,6 @@ int main(void)
 				break;
 			case Flash:
 				cli();
-					modeState++;
 					if(modeState & 0x8) {
 						OCR0A = 0x02;
 					} else {
@@ -115,21 +96,22 @@ int main(void)
 				prepareForOffMode();
 				break;
 		}
+		modeState++;
 		
 		cli();
 			sleep_enable();
-			if((currentMode & MODEMASK) == Off) {
+			if(currentMode == Off) {
 				sleep_bod_disable();
 			}
 			sei();
 			sleep_cpu();
 			sleep_disable();
 		sei();
-		if((currentMode & MODEMASK) == Off) { // On waking from the off state go into the on state
+		if(currentMode == Off) { // On waking from the off state go into the breathing state
 			prepareForOnModes();
 			OCR0A = 0xFF;
 			waitForButtonRelease(); // Wait for the button to be released
-			currentMode = High;
+			currentMode = Breathe;
 			butonState = 0xFE;
 		}
 	}
@@ -163,6 +145,31 @@ static void prepareForOnModes(void)
 	GIMSK &= ~(1 << INT0); // Disable external interrupts on INT0
 }
 
+static uint8_t getBreathIntensity(const uint8_t findMe)
+{
+	const uint8_t idxLow = findMe >> 3;
+	const uint8_t valLow = pgm_read_byte(breathTable + idxLow);
+	const uint8_t valHigh = pgm_read_byte(breathTable + idxLow + 1);
+
+	uint8_t grad;
+	uint8_t offSet;
+	uint8_t val;
+	if(valHigh >= valLow) {
+		grad = valHigh - valLow;
+	} else {
+		grad = valLow - valHigh;
+	}
+	grad = (grad + (1<<(BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR - 1))) >> (BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR);
+	offSet = (grad*(findMe & 0x7) + (1 << (BREATH_GRADSCALEPWR - 1))) >> BREATH_GRADSCALEPWR;
+	if(valHigh >= valLow) {
+		val = valLow + offSet;
+	} else {
+		val = valLow - offSet;
+	}
+
+	return val;
+}
+
 static void waitForButtonRelease(void)
 {
 	uint8_t butonStateUp = 0xFC;
@@ -174,7 +181,6 @@ static void waitForButtonRelease(void)
 
 ISR(WDT_vect)
 {
-	OCR0A += pulseCommand;
 }
 
 ISR(INT0_vect)
