@@ -3,7 +3,7 @@
  *
  * Created: 30/10/2019 23:23:50
  * Author : Sam
- */ 
+ */
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -37,79 +37,69 @@ static void waitForButtonRelease(void);
 int main(void)
 {
 	initHW();
-	
+
 	random16InitFromSeed(0xBEEF);
 
 	prepareForOffMode(); // The system immediately goes into low power mode so we prepare for this
 
-	uint16_t modeState = 0;
+	uint16_t modeTimer = 0;
 	uint8_t butonState = 0xFE;
+	uint8_t currentIntensity = 0xFF;
 	enum DisaplyMode currentMode = Off;
 	while(1) {
-		uint8_t val;
 		// Definition of input control
 		butonState = (butonState << 1) | (PINB & (1 << PINB1)) | (0xE0); // De-bounce the input with some don't cares (so that the button remains responsive)
 		if(butonState == 0xF0) { // Button pressed
 			currentMode++; // Next mode on button pressed
-			if(currentMode > Off) {
-				currentMode = Breathe;
-			}
 		}
-		
+
 		// Definition of output behavior
 		switch(currentMode) {
 			case Breathe:
-					val = getBreathIntensity(2*(modeState >> 2));
-					cli();
-						OCR0A = val;
-					sei();
+				currentIntensity = getBreathIntensity(2*(modeTimer >> 2));
+				OCR0A = currentIntensity;
 				break;
 			case Freeze: // Hold the current intensity
 				break;
 			case Flicker:
-				if((modeState & 0x3) == 0) {
+				if((modeTimer & 0x3) == 0) {
 					if((random16() + (1<<15)) < (1<<15)) {
-						cli();
-							OCR0A = 0xFF;
-						sei();
+						OCR0A = currentIntensity;
 					} else {
-						cli();
-							OCR0A = 0x02;
-						sei();
+						OCR0A = 0x02;
 					}
 				}
 				break;
 			case Flash:
-				cli();
-					if(modeState & 0x8) {
-						OCR0A = 0x02;
-					} else {
-						OCR0A = 0xFF;
-					}
-				sei();
+				if(modeTimer & 0x8) {
+					OCR0A = 0x02;
+				} else {
+					OCR0A = currentIntensity;
+				}
 				break;
 			case Off:
-				cli();
-					OCR0A = 0x10;
-				sei();
+				OCR0A = 0x01;
 				waitForButtonRelease();
 				prepareForOffMode();
 				break;
 		}
-		modeState++;
-		
-		cli();
+		modeTimer++;
+
+		// Go to sleep and wait for the next io update
+		if(currentMode == Off) {
 			sleep_enable();
-			if(currentMode == Off) {
-				sleep_bod_disable();
-			}
-			sei();
+			sleep_bod_disable();
 			sleep_cpu();
 			sleep_disable();
-		sei();
+		} else {
+			sleep_mode();
+		}
+
+		// On waking from off mode
 		if(currentMode == Off) { // On waking from the off state go into the breathing state
 			prepareForOnModes();
-			OCR0A = 0xFF;
+			currentIntensity = getBreathIntensity(2*(modeTimer >> 2));
+			OCR0A = currentIntensity;
 			waitForButtonRelease(); // Wait for the button to be released
 			currentMode = Breathe;
 			butonState = 0xFE;
