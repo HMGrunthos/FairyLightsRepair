@@ -30,7 +30,7 @@ enum DisaplyMode {
 #define BREATHINGDIVIDER(x) ((x) >> 1)
 #define BREATH_DXINXSCALE_ASPOWER 3
 #define BREATH_GRADSCALEPWR 2
-static const uint8_t breathTable[33] PROGMEM = {255, 245, 203, 165, 136, 112, 91, 75, 62, 51, 42, 35, 29, 24, 20, 16, 13, 10, 8, 7, 7, 8, 11, 17, 25, 36, 52, 72, 97, 131, 170, 216, 255};
+static const uint8_t breathTable[33] PROGMEM = {255, 243, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
 
 static volatile uint16_t sleepCounter = 0;
 static volatile uint_fast8_t timerWake = 0;
