@@ -16,6 +16,8 @@
 #include "Random.h"
 // #include "Serial.h"
 
+#define BUTTONPIN PINB1
+
 enum DisaplyMode {
 	Breathe,
 	Freeze,
@@ -24,6 +26,7 @@ enum DisaplyMode {
 	Off
 };
 
+#define BREATHINGDIVIDER(x) ((x) >> 1)
 #define BREATH_DXINXSCALE_ASPOWER 3
 #define BREATH_GRADSCALEPWR 2
 static const uint8_t breathTable[33] PROGMEM = {255, 245, 203, 165, 136, 112, 91, 75, 62, 51, 42, 35, 29, 24, 20, 16, 13, 10, 8, 7, 7, 8, 11, 17, 25, 36, 52, 72, 97, 131, 170, 216, 255};
@@ -48,7 +51,7 @@ int main(void)
 	enum DisaplyMode currentMode = Off;
 	while(1) {
 		// Definition of input control
-		butonState = (butonState << 1) | (PINB & (1 << PINB1)) | (0xE0); // De-bounce the input with some don't cares (so that the button remains responsive)
+		butonState = (butonState << 1) | (PINB & (1 << BUTTONPIN)) | (0xE0); // De-bounce the input with some don't cares (so that the button remains responsive)
 		if(butonState == 0xF0) { // Button pressed
 			currentMode++; // Next mode on button pressed
 		}
@@ -56,14 +59,15 @@ int main(void)
 		// Definition of output behavior
 		switch(currentMode) {
 			case Breathe:
-				currentIntensity = getBreathIntensity(2*(modeTimer >> 2));
+				currentIntensity = getBreathIntensity(BREATHINGDIVIDER(modeTimer));
 				OCR0A = currentIntensity;
 				break;
-			case Freeze: // Hold the current intensity
+			case Freeze: // Hold the current intensity, leave OCR0A unchanged
 				break;
 			case Flicker:
+				// Each time the mode timer comes around then choose a new state based on random16()
 				if((modeTimer & 0x3) == 0) {
-					if((random16() + (1<<15)) < (1<<15)) {
+					if((random16() + (((uint16_t)1<<15) - 1)) & 0x8000) {
 						OCR0A = currentIntensity;
 					} else {
 						OCR0A = 0x02;
@@ -71,6 +75,7 @@ int main(void)
 				}
 				break;
 			case Flash:
+				// Each time a mode timer bit changes state then change the light state
 				if(modeTimer & 0x8) {
 					OCR0A = 0x02;
 				} else {
@@ -78,6 +83,7 @@ int main(void)
 				}
 				break;
 			case Off:
+				// Get ready to turn off
 				OCR0A = 0x01;
 				waitForButtonRelease();
 				prepareForOffMode();
@@ -98,9 +104,9 @@ int main(void)
 		// On waking from off mode
 		if(currentMode == Off) { // On waking from the off state go into the breathing state
 			prepareForOnModes();
-			currentIntensity = getBreathIntensity(2*(modeTimer >> 2));
+			currentIntensity = getBreathIntensity(BREATHINGDIVIDER(modeTimer));
 			OCR0A = currentIntensity;
-			waitForButtonRelease(); // Wait for the button to be released
+			waitForButtonRelease(); // Wait for the button to be released - we know it was pressed because we awoke from sleep
 			currentMode = Breathe;
 			butonState = 0xFE;
 		}
@@ -121,6 +127,15 @@ static void initHW(void)
 	sei();
 }
 
+static void waitForButtonRelease(void)
+{
+	uint8_t butonStateUp = 0xFC; // Assue the button is pressed to begin with
+	do {
+		butonStateUp = (butonStateUp << 1) | (PINB & (1 << BUTTONPIN)); // De-bounce the input
+		_delay_ms(16);
+	} while(butonStateUp != 0x7E); // This loop waits for the button to go high (i.e. be released.)
+}
+
 static void prepareForOffMode(void)
 {
 	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
@@ -137,20 +152,21 @@ static void prepareForOnModes(void)
 
 static uint8_t getBreathIntensity(const uint8_t findMe)
 {
-	const uint8_t idxLow = findMe >> 3;
-	const uint8_t valLow = pgm_read_byte(breathTable + idxLow);
-	const uint8_t valHigh = pgm_read_byte(breathTable + idxLow + 1);
+	const uint8_t idxLow = findMe >> 3; // Find the lower lookup bin
+	const uint8_t valLow = pgm_read_byte(breathTable + idxLow); // Lower adjacent bin
+	const uint8_t valHigh = pgm_read_byte(breathTable + idxLow + 1); // Upper adjacent bin
 
 	uint8_t grad;
 	uint8_t offSet;
 	uint8_t val;
-	if(valHigh >= valLow) {
+	if(valHigh >= valLow) { // If gradient is >= 0
 		grad = valHigh - valLow;
-	} else {
+	} else { // If gradient is < 0
 		grad = valLow - valHigh;
 	}
 	grad = (grad + (1<<(BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR - 1))) >> (BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR);
 	offSet = (grad*(findMe & 0x7) + (1 << (BREATH_GRADSCALEPWR - 1))) >> BREATH_GRADSCALEPWR;
+	// Apply offset based on the sign of grad
 	if(valHigh >= valLow) {
 		val = valLow + offSet;
 	} else {
@@ -158,15 +174,6 @@ static uint8_t getBreathIntensity(const uint8_t findMe)
 	}
 
 	return val;
-}
-
-static void waitForButtonRelease(void)
-{
-	uint8_t butonStateUp = 0xFC;
-	do {
-		butonStateUp = (butonStateUp << 1) | (PINB & (1 << PINB1)); // De-bounce the input
-		_delay_ms(16);
-	} while(butonStateUp != 0x7E); // This loop waits for the button to go high (i.e. be released.)
 }
 
 ISR(WDT_vect)
