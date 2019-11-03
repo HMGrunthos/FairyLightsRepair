@@ -9,7 +9,7 @@
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <avr/pgmspace.h>
-#include <util/delay.h>
+#include <avr/eeprom.h>
 
 #include <stdlib.h>
 
@@ -18,17 +18,18 @@
 
 #define BUTTONPIN PINB1
 
-#define TICKPERIOD (9.256687957e-4)
+#define TICKPERIOD (8.541669681e-4)
 #define TOTICKS(x) ((uint_fast32_t)((x)/TICKPERIOD + 0.5))
-#define ONDURATION TOTICKS(10)
-#define DAYPERIOD TOTICKS(25)
+#define ONDURATION TOTICKS(39600)
+#define DAYPERIOD TOTICKS(60*60*(uint_fast32_t)8)
 
 // #define BREATHINGDIVIDER(x) (3*((x) >> 2))
 #define BREATHINGDIVIDER(x) ((3*(x) + (1<<2)) >> 3)
 #define BREATH_DXINXSCALE_ASPOWER 3
 #define BREATH_GRADSCALEPWR 2
-// static const uint8_t breathTable[33] PROGMEM = {255, 243, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
-static const uint8_t breathTable[33] PROGMEM = {255, 255, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
+static const uint8_t breathTable[33] PROGMEM = {255, 243, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
+
+static const uint8_t oscCal4M8 EEMEM = 0x65;
 
 enum DisaplyMode {
 	Breathe,
@@ -63,7 +64,7 @@ int main(void)
 	enum DisaplyMode currentMode = Off;
 	enum DisaplyMode lastMode = Breathe;
 	while(1) {
-		uint_fast8_t wakeUp;
+		uint_fast8_t wakeUp = 0;
 
 		// Definition of input control
 		butonState = (butonState << 1) | (PINB & (1 << BUTTONPIN)) | (0xE0); // De-bounce the input with some don't cares (so that the button remains responsive)
@@ -153,7 +154,7 @@ ReSleep:
 		sei();
 
 		if(currentMode == Wait) {
-			if(wakeUp == 1) { // We're still waking because the tick timer is still going off
+			if(wakeUp == 1) { // We're still waking because the tick timer is going off
 				goto ReSleep;
 			} else if(wakeUp == 0) { // We were probably awoken by a button press go back into the default mode
 				currentMode = Off; // This will trip us back into breathe
@@ -178,14 +179,21 @@ ReSleep:
 
 static void initHW(void)
 {
+	// Apply the RC calibration
+	uint8_t oscFix = eeprom_read_byte(&oscCal4M8);
+	if(oscFix != 0xFF) {
+		while(OSCCAL != oscFix) {
+			OSCCAL += OSCCAL > oscFix ? -1 : 1;
+		}
+	}
+
 	// Lights are on PB0
 	// Switch input is on PB1
-	PORTB &= ~(1 << PORTB0); // Lights off
 	DDRB |= (1 << DDB0); // Lights pin set as an output
 	PORTB |= (1 << PORTB1) | (1 << PORTB2) | (1 << PORTB3) | (1 << PORTB4) | (1 << PORTB5); // Enable the pullups on all the digital inputs
 
-	TCCR0A = (1 << COM0A1) | (0 << COM0A0) | (1 << WGM00); // PWM(Phase Correct)
-	TCCR0B = (1 << CS00); // Divide input clock by 1 to give a clock at 600000 and a TOV0 at 1.176470588kHz
+	TCCR0A = (1 << WGM00); // PWM(Phase Correct)
+	TCCR0B = (1 << CS00); // Divide input clock by 1 to give a clock at 600000 and a TOV0 at 1.170731294kHz
 	TIMSK0 = (1 << TOIE0); // Enable the overflow interrupt
 
 	PRR = (1 << PRADC); // We don't need the ADC so turn it off
@@ -273,7 +281,6 @@ static uint8_t getBreathIntensity(const uint8_t findMe)
 ISR(TIM0_OVF_vect)
 {
 	sleepCounter++;
-	// if((sleepCounter & 0x0000000F) == 0) {
 	if(((*(uint8_t*)&sleepCounter) & 0x0F) == 0) {
 		if(!startWaiting) {
 			timerWake = 1; // Wake at 73.5Hz when running with clock divider set to 1
