@@ -18,26 +18,36 @@
 
 #define BUTTONPIN PINB1
 
+#define TICKPERIOD (9.256687957e-4)
+#define TOTICKS(x) ((uint_fast32_t)((x)/TICKPERIOD + 0.5))
+#define ONDURATION TOTICKS(10)
+#define DAYPERIOD TOTICKS(25)
+
+// #define BREATHINGDIVIDER(x) (3*((x) >> 2))
+#define BREATHINGDIVIDER(x) ((3*(x) + (1<<2)) >> 3)
+#define BREATH_DXINXSCALE_ASPOWER 3
+#define BREATH_GRADSCALEPWR 2
+// static const uint8_t breathTable[33] PROGMEM = {255, 243, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
+static const uint8_t breathTable[33] PROGMEM = {255, 255, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
+
 enum DisaplyMode {
 	Breathe,
 	Freeze,
 	Flicker,
 	Flash,
-	Off
+	Off,
+	Wait
 };
 
-// #define BREATHINGDIVIDER(x) (3*((x) >> 2))
-#define BREATHINGDIVIDER(x) ((x) >> 1)
-#define BREATH_DXINXSCALE_ASPOWER 3
-#define BREATH_GRADSCALEPWR 2
-static const uint8_t breathTable[33] PROGMEM = {255, 243, 200, 164, 135, 110, 90, 74, 60, 50, 41, 34, 28, 23, 18, 15, 12, 9, 7, 6, 6, 8, 11, 16, 24, 36, 52, 72, 99, 131, 172, 221, 255};
-
-static volatile uint16_t sleepCounter = 0;
+static volatile uint32_t sleepCounter = 0;
 static volatile uint_fast8_t timerWake = 0;
+static volatile uint_fast8_t startWaiting = 0;
+static volatile uint_fast8_t buttonWakeUp = 0;
 
 static void initHW(void);
 static void prepareForOffMode(void);
 static void prepareForOnModes(void);
+static void prepareForWaitMode(void);
 static uint8_t getBreathIntensity(const uint8_t findMe);
 static void waitForButtonRelease(void);
 
@@ -51,11 +61,23 @@ int main(void)
 	uint8_t butonState = 0xFE;
 	uint8_t currentIntensity = 0xFF;
 	enum DisaplyMode currentMode = Off;
+	enum DisaplyMode lastMode = Breathe;
 	while(1) {
+		uint_fast8_t wakeUp;
+
 		// Definition of input control
 		butonState = (butonState << 1) | (PINB & (1 << BUTTONPIN)) | (0xE0); // De-bounce the input with some don't cares (so that the button remains responsive)
 		if(butonState == 0xF0) { // Button pressed
 			currentMode++; // Next mode on button pressed
+		}
+
+		uint_fast32_t sleepStep;
+		cli();
+			sleepStep = sleepCounter;
+		sei();
+		if(sleepStep >= ONDURATION) {
+			lastMode = currentMode;
+			currentMode = Wait;
 		}
 
 		// Definition of output behavior
@@ -90,10 +112,14 @@ int main(void)
 				waitForButtonRelease();
 				prepareForOffMode();
 				break;
+			case Wait:
+				// Get ready to wait
+				prepareForWaitMode();
+				break;
 		}
 		modeTimer++;
 
-		uint_fast8_t wakeUp;
+ReSleep:
 		do {
 			// Go to sleep and wait for the next IO update
 			if(currentMode == Off) {
@@ -107,11 +133,15 @@ int main(void)
 				cli();
 				if(!timerWake) {
 					sleep_enable();
+					sleep_bod_disable();
 					sei();
 					sleep_cpu();
 					sleep_disable();
 				}
 				sei();
+				if(buttonWakeUp) { // Only really should occur in Wake mode
+					break;
+				}
 			}
 			cli();
 				wakeUp = timerWake;
@@ -119,16 +149,29 @@ int main(void)
 		} while(!wakeUp);
 		cli();
 			timerWake = 0;
+			buttonWakeUp = 0;
 		sei();
+
+		if(currentMode == Wait) {
+			if(wakeUp == 1) { // We're still waking because the tick timer is still going off
+				goto ReSleep;
+			} else if(wakeUp == 0) { // We were probably awoken by a button press go back into the default mode
+				currentMode = Off; // This will trip us back into breathe
+			} else { // wakeUp must be == 2 (at least I hope it is)
+				prepareForOnModes();
+				currentMode = lastMode;
+				butonState = 0xFE;
+			}
+		}
 
 		// On waking from off mode
 		if(currentMode == Off) { // On waking from the off state go into the breathing state
 			prepareForOnModes();
-			currentIntensity = getBreathIntensity(BREATHINGDIVIDER(modeTimer));
-			OCR0A = currentIntensity;
+			OCR0A = 0xFF;
 			waitForButtonRelease(); // Wait for the button to be released - we know it was pressed because we awoke from sleep
 			currentMode = Breathe;
 			butonState = 0xFE;
+			modeTimer = 0;
 		}
 	}
 }
@@ -178,8 +221,23 @@ static void prepareForOffMode(void)
 	PORTB &= ~(1 << PORTB0); // Lights off
 }
 
+static void prepareForWaitMode(void)
+{
+	cli();
+		startWaiting = 1;
+	sei();
+	set_sleep_mode(SLEEP_MODE_IDLE);
+	GIMSK |= (1 << INT0); // Enable external interrupts on INT0
+	TCCR0A &= ~(1 << COM0A1) & ~(0 << COM0A0); // Turn off timer controlled PWM pin
+	PORTB &= ~(1 << PORTB0); // Lights off
+}
+
 static void prepareForOnModes(void)
 {
+	cli();
+		sleepCounter = 0;
+		startWaiting = 0;
+	sei();
 	set_sleep_mode(SLEEP_MODE_IDLE);
 	GIMSK &= ~(1 << INT0); // Disable external interrupts on INT0
 	TIMSK0 |= (1 << TOIE0); // Turn back on timer interrupt
@@ -215,11 +273,17 @@ static uint8_t getBreathIntensity(const uint8_t findMe)
 ISR(TIM0_OVF_vect)
 {
 	sleepCounter++;
-	if((sleepCounter & 0x0000000F) == 0) {
-		timerWake = 1; // Wake at 73.5Hz when running with clock divider set to 1
+	// if((sleepCounter & 0x0000000F) == 0) {
+	if(((*(uint8_t*)&sleepCounter) & 0x0F) == 0) {
+		if(!startWaiting) {
+			timerWake = 1; // Wake at 73.5Hz when running with clock divider set to 1
+		} else if(sleepCounter > DAYPERIOD) {
+			timerWake = 2;
+		}
 	}
 }
 
 ISR(INT0_vect)
 {
+	buttonWakeUp = 1;
 }
