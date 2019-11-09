@@ -10,13 +10,16 @@
 #include <avr/sleep.h>
 #include <avr/pgmspace.h>
 #include <avr/wdt.h>
+#include <avr/power.h>
 
 #include <stdlib.h>
 
 #include "Random.h"
 // #include "Serial.h"
 
+#define RESETLOCK PORTB2
 #define BUTTONPIN PINB1
+#define LIGHTSPIN PORTB0
 // #define CALCLOCK
 
 #define TICKPERIOD (1.139203319e-3)
@@ -25,8 +28,8 @@
 // #define DAYPERIOD TOTICKS(60*60*(uint_fast32_t)24)
 // #define ONDURATION (16)
 // #define DAYPERIOD (20)
-#define ONDURATION TOTICKS(10)
-#define DAYPERIOD TOTICKS(20)
+#define ONDURATION TOTICKS(5*60)
+#define DAYPERIOD TOTICKS(60*60*4)
 
 // #define BREATHINGDIVIDER(x) (3*((x) >> 2))
 #define BREATHINGDIVIDER(x) ((3*(x) + (1<<2)) >> 3)
@@ -130,7 +133,6 @@ int main(void)
 		}
 		modeTimer++;
 
-ReSleep:
 		do {
 			sleep_mode();
 			cli();
@@ -142,19 +144,11 @@ ReSleep:
 		sei();
 
 		if(currentMode == Wait) {
-			if(wakeUp == 1) { // We're still waking because the tick timer is going off
-				goto ReSleep;
-			} else { // wakeUp must be == 2 (at least I hope it is)
+			if(wakeUp == 2) { // wakeUp must be == 2 (at least I hope it is)
 				exitWaitMode();
 				currentMode = lastMode;
 				butonState = 0xFE;
 			}
-		}
-
-		// On waking from off mode
-		if(currentMode == Off) { // This will probably never happed since we should reset from the interrupt handler
-			wdt_enable(WDTO_15MS);
-		   for(;;);
 		}
 	}
 }
@@ -189,8 +183,11 @@ static void initHW(void)
 
 	// Lights are on PB0
 	// Switch input is on PB1
-	DDRB = (1 << DDB0); // Lights pin set as an output
-	PORTB = (1 << PORTB1) | (1 << PORTB2) | (1 << PORTB4) | (1 << PORTB5); // Enable the pullups on all the digital inputs (except PB3 which is our clock input)
+	// Reset disable is on PB2
+	DDRB = (1 << DDB2) | (1 << DDB0); // Lights pin set as an output
+	// Enable the pullups on all the digital inputs (except PB3 which is our clock input)
+	// Take PB2 high to ensure reset is disabled
+	PORTB = (1 << PORTB1) | (1 << RESETLOCK) | (1 << PORTB4) | (1 << PORTB5);
 
 	TCCR0B = (1 << CS00); // Divide input clock by 1 to give a clock at 447681.28Hz and a TOV0 at 877.8064314Hz at 447681.28Hz
 	#ifdef CALCLOCK
@@ -229,16 +226,20 @@ static void prepareForWaitMode(void)
 	set_sleep_mode(SLEEP_MODE_IDLE);
 	GIMSK |= (1 << INT0); // Enable external interrupts on INT0
 	TCCR0A &= ~(1 << COM0A1) & ~(0 << COM0A0); // Turn off timer controlled PWM pin
-	PORTB &= ~(1 << PORTB0); // Lights off
+	PORTB &= ~(1 << LIGHTSPIN); // Lights off
 }
 
 static void prepareForOffMode(void)
 {
 	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+	clock_prescale_set(clock_div_256);
 	GIMSK |= (1 << INT0); // Enable external interrupts on INT0
 	TIMSK0 &= ~(1 << TOIE0); // Turn off timer interrupt
-	TCCR0A &= ~(1 << COM0A1) & ~(0 << COM0A0); // Turn off timer controlled PWM pin
-	PORTB &= ~(1 << PORTB0); // Lights off
+	TCCR0A = 0; // Turn off timer controlled PWM pin
+	TCCR0B = 0; // Disable timer input clock
+	PRR |= (1 << PRTIM0); // No longer need the timer
+	PORTB &= ~(1 << LIGHTSPIN); // Lights off
+	PORTB &= ~(1 << RESETLOCK); // Disable reset lockout
 }
 
 static uint8_t getBreathIntensity(const uint8_t findMe)
@@ -255,7 +256,7 @@ static uint8_t getBreathIntensity(const uint8_t findMe)
 	} else { // If gradient is < 0
 		grad = valLow - valHigh;
 	}
-	grad = (grad + (1<<(BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR - 1))) >> (BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR);
+	grad = (grad + (1 << (BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR - 1))) >> (BREATH_DXINXSCALE_ASPOWER - BREATH_GRADSCALEPWR);
 	offSet = (grad*(findMe & 0x7) + (1 << (BREATH_GRADSCALEPWR - 1))) >> BREATH_GRADSCALEPWR;
 	// Apply offset based on the sign of grad
 	if(valHigh >= valLow) {
