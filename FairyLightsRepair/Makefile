@@ -118,8 +118,10 @@ AVRDUDE_PORT =
 
 AVRDUDE_WRITE_FLASH = -U flash:w:$(TARGET).hex
 AVRDUDE_WRITE_EEPROM = -U eeprom:w:$(TARGET).eep
-# AVRDUDE_WRITE_FUSES = -U lfuse:w:0x38:m -U hfuse:w:0xff:m # external, divide external clock by 1
-AVRDUDE_WRITE_FUSES = -U lfuse:w:0x28:m -U hfuse:w:0xff:m # external, divide external clock by 8
+# AVRDUDE_WRITE_FUSES = -U lfuse:w:0x25:m -U hfuse:w:0xff:m # internal 4.8MHz quick start up, divide external clock by 8
+# AVRDUDE_WRITE_FUSES = -U lfuse:w:0x38:m -U hfuse:w:0xff:m # external slow start, divide external clock by 1
+# AVRDUDE_WRITE_FUSES = -U lfuse:w:0x28:m -U hfuse:w:0xff:m # external slow start, divide external clock by 8
+AVRDUDE_WRITE_FUSES = -U lfuse:w:0x24:m -U hfuse:w:0xff:m # external fast start, divide external clock by 8
 
 
 # Uncomment the following if you want avrdude's erase cycle counter.

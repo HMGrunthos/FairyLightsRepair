@@ -17,6 +17,7 @@
 #include "Random.h"
 // #include "Serial.h"
 
+#define OSCPOWER PORTB4
 #define RESETLOCK PORTB2
 #define BUTTONPIN PINB1
 #define LIGHTSPIN PORTB0
@@ -24,12 +25,12 @@
 
 #define TICKPERIOD (1.139203319e-3)
 #define TOTICKS(x) ((uint_fast32_t)((x)/TICKPERIOD + 0.5))
-// #define ONDURATION TOTICKS(60*60*9)
-// #define DAYPERIOD TOTICKS(60*60*(uint_fast32_t)24)
+#define ONDURATION TOTICKS(60*60*9)
+#define DAYPERIOD TOTICKS(60*60*(uint_fast32_t)24)
 // #define ONDURATION (16)
 // #define DAYPERIOD (20)
-#define ONDURATION TOTICKS(5*60)
-#define DAYPERIOD TOTICKS(60*60*4)
+// #define ONDURATION TOTICKS(5*60)
+// #define DAYPERIOD TOTICKS(60*60*4)
 
 // #define BREATHINGDIVIDER(x) (3*((x) >> 2))
 #define BREATHINGDIVIDER(x) ((3*(x) + (1<<2)) >> 3)
@@ -184,10 +185,11 @@ static void initHW(void)
 	// Lights are on PB0
 	// Switch input is on PB1
 	// Reset disable is on PB2
-	DDRB = (1 << DDB2) | (1 << DDB0); // Lights pin set as an output
-	// Enable the pullups on all the digital inputs (except PB3 which is our clock input)
-	// Take PB2 high to ensure reset is disabled
-	PORTB = (1 << PORTB1) | (1 << RESETLOCK) | (1 << PORTB4) | (1 << PORTB5);
+	// Oscillator power is on PB4
+
+	// Take PB2 high to ensure reset is disabled and PB4 to make sure the OSC power comes on
+	PORTB = (1 << PORTB1) | (1 << RESETLOCK) | (1 << OSCPOWER);
+	DDRB = (1 << DDB4) | (1 << DDB2) | (1 << DDB0); // Then enable outputs
 
 	TCCR0B = (1 << CS00); // Divide input clock by 1 to give a clock at 447681.28Hz and a TOV0 at 877.8064314Hz at 447681.28Hz
 	#ifdef CALCLOCK
@@ -214,7 +216,6 @@ static void exitWaitMode(void)
 	sei();
 	set_sleep_mode(SLEEP_MODE_IDLE);
 	GIMSK &= ~(1 << INT0); // Disable external interrupts on INT0
-	TIMSK0 |= (1 << TOIE0); // Turn back on timer interrupt
 	TCCR0A |= (1 << COM0A1) | (0 << COM0A0); // Turn on the PWM pin
 }
 
@@ -238,8 +239,9 @@ static void prepareForOffMode(void)
 	TCCR0A = 0; // Turn off timer controlled PWM pin
 	TCCR0B = 0; // Disable timer input clock
 	PRR |= (1 << PRTIM0); // No longer need the timer
+	DDRB &= ~(1 << DDB4) & ~(1 << DDB2); // Reset disable and osc power to inputs
 	PORTB &= ~(1 << LIGHTSPIN); // Lights off
-	PORTB &= ~(1 << RESETLOCK); // Disable reset lockout
+	PORTB &= ~(1 << RESETLOCK) & ~(1 << OSCPOWER); // Disable reset-disable and osc-power pull ups
 }
 
 static uint8_t getBreathIntensity(const uint8_t findMe)
