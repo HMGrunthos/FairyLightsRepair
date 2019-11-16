@@ -23,9 +23,9 @@
 #define LIGHTSPIN PORTB0
 // #define CALCLOCK
 
-#define TICKPERIOD (1.139203319e-3)
+#define TICKPERIOD (1.139814858e-3)
 #define TOTICKS(x) ((uint_fast32_t)((x)/TICKPERIOD + 0.5))
-#define ONDURATION TOTICKS(60*60*9)
+#define ONDURATION TOTICKS(60*60*8.5)
 #define DAYPERIOD TOTICKS(60*60*(uint_fast32_t)24)
 // #define ONDURATION (16)
 // #define DAYPERIOD (20)
