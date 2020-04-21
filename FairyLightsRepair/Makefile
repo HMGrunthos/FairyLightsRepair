@@ -34,6 +34,7 @@
 # To rebuild project do "make clean" then "make all".
 # ---------------------------------------------------------------------------
 
+# Set path for avrgcc: PATH:~/avr-gcc-9.2/bin/
 
 MCU = attiny13a
 MCUDUDE = t13
