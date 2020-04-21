@@ -34,7 +34,8 @@
 # To rebuild project do "make clean" then "make all".
 # ---------------------------------------------------------------------------
 
-# Set path for avrgcc: PATH:~/avr-gcc-9.2/bin/
+# Set path for avrgcc: PATH=$PATH:~/avr-gcc-9.2/bin/
+# Add libmpfr4 to library path: export LD_LIBRARY_PATH=~/avr-gcc-9.2/patchLibs/
 
 MCU = attiny13a
 MCUDUDE = t13
